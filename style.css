@@ -1,0 +1,58 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  /* キャンバス外の余白は白 */
+  background: #fff;
+  color: #111;
+  font-family: sans-serif;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.page {
+  /* キャンバスを画面中央に配置 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  /* ロゴ文字(DOM)をキャンバスに重ねる基準 */
+  position: relative;
+}
+
+canvas {
+  display: block;
+}
+
+/* ロゴ文字：キャンバスの左上を原点に絶対配置し、JS で transform を更新 */
+.letter {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: center center;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 線専用オーバーレイ：メイン canvas とロゴ <img> のさらに手前に重ねる */
+.overlay-lines {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 10; /* .letter（既定の重なり）より前面 */
+}
+

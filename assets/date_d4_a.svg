@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 412.79 63.92">
+  <defs>
+    <style>
+      .cls-9 { fill: url(#_新規グラデーションスウォッチ_1-6); }
+    </style>
+    <linearGradient id="_新規グラデーションスウォッチ_1-6" data-name="新規グラデーションスウォッチ 1" x1="379.98" y1="18.03" x2="414.94" y2="40.68" xlink:href="#_新規グラデーションスウォッチ_1"/>
+    <linearGradient id="_新規グラデーションスウォッチ_1" data-name="新規グラデーションスウォッチ 1" x1="203.03" y1="58.14" x2="212.79" y2="58.14" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#bb1b87"/>
+      <stop offset=".23" stop-color="#9d1878"/>
+      <stop offset=".38" stop-color="#8f1871"/>
+      <stop offset=".44" stop-color="#851c78"/>
+      <stop offset=".57" stop-color="#722685"/>
+      <stop offset=".67" stop-color="#6c2a8b"/>
+      <stop offset=".7" stop-color="#5a4092"/>
+      <stop offset=".76" stop-color="#3e629d"/>
+      <stop offset=".82" stop-color="#297ca5"/>
+      <stop offset=".87" stop-color="#1a8fac"/>
+      <stop offset=".94" stop-color="#109baf"/>
+      <stop offset="1" stop-color="#0e9fb1"/>
+    </linearGradient>
+  </defs>
+  <path class="cls-9" d="M404.42,62.4h-6.48v-17.22h-26.81v-4.35L397.37.98h7.05v38.95h8.36v5.25h-8.36v17.22ZM378.02,39.93h19.93v-21.81c0-3.36.16-6.64.33-9.84h-.33c-1.89,3.77-3.36,6.4-4.92,9.18l-15.01,22.3v.16Z"/>
+</svg>

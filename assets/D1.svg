@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 544.25 214.79">
+  <defs>
+    <style>
+      .cls-1 { fill: url(#g4895); }
+      .cls-7 { fill: url(#g7322); }
+      .cls-9 { fill: url(#g7439); }
+    </style>
+    <linearGradient id="g4895" x1="236.6" y1="214.79" x2="236.6" y2="1.01" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3a8aaa"/>
+      <stop offset=".55" stop-color="#384391"/>
+      <stop offset=".76" stop-color="#534190"/>
+      <stop offset=".86" stop-color="#7b3c8c"/>
+      <stop offset="1" stop-color="#ce2774"/>
+    </linearGradient>
+    <linearGradient id="g7322" x1="353.12" y1="98.14" x2="247.68" y2="213.48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#184754"/>
+      <stop offset=".26" stop-color="#1d8ab3"/>
+      <stop offset=".46" stop-color="#384391"/>
+      <stop offset=".73" stop-color="#64367f"/>
+      <stop offset=".97" stop-color="#310027"/>
+    </linearGradient>
+    <linearGradient id="g7439" x1="261.07" y1="-7.14" x2="347.38" y2="101.59" gradientUnits="userSpaceOnUse">
+      <stop offset=".16" stop-color="#00a6a4"/>
+      <stop offset=".38" stop-color="#087b87"/>
+      <stop offset=".68" stop-color="#7c3673"/>
+      <stop offset=".82" stop-color="#c82780"/>
+    </linearGradient>
+  </defs>
+  <g id="D-2">
+    <path class="cls-1" d="M265.06,102.97c2.55-12.45-.64,3.32,6.79-36.62,4.73-25.4,8.64-46.21,11.25-60.08h-51.3c5.41,28.35-7.21,94.1-13.88,123.34-3.64,14.12-10.59,39.81-27.83,85.18h43.4c9.67-36.94,17.1-41.06,31.56-111.82Z"/>
+    <path class="cls-7" d="M328.12,192.42c32.46-28.63,39.24-73.1,32.93-94.64-2.58-8.8-7.27-16.15-7.27-16.15-8.74-13.39-20.86-19.41-26.38-23.12.41,1.5.98,3.74,1.52,6.54,0,0,1.18,4.91,1.37,9.94,2.2,56.51-34.08,114.41-64.52,107.7-4.34-.96-21-2.44-16-18.13-5.73,17.97-11.82,32.92-16.27,50.24,1.39-5.4,55.79,11.88,94.62-22.37Z"/>
+    <path class="cls-9" d="M361.05,97.78s.02-.06.02-.19c0-54.97-51.58-96.27-104.22-97.59l6.27,47.34h15.27c8.12-.49,28.02-.59,49,11.18"/>
+  </g>
+</svg>
