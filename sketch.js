@@ -2526,6 +2526,64 @@ function keyPressed() {
       el.style.display = (el.style.display === 'none') ? '' : 'none';
     }
   }
+  if (key === 's' || key === 'S') {
+    // 見た目全体（メインキャンバス + ロゴSVG + 線オーバーレイ）を1枚に合成して保存
+    saveScreenshot();
+  }
+}
+
+// 3つのレイヤー（メインcanvas / ロゴ<img> / 線オーバーレイcanvas）を
+// 重なり順どおりに合成し、PNG としてダウンロードする。
+function saveScreenshot() {
+  const mainCanvas = document.querySelector('#canvas-wrap canvas');
+  if (!mainCanvas) return;
+  const W = mainCanvas.width, H = mainCanvas.height;
+
+  // 合成用 canvas
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const ctx = out.getContext('2d');
+
+  // 1) メインキャンバス（背景・図形・帯）
+  ctx.drawImage(mainCanvas, 0, 0);
+
+  // 2) ロゴSVG（.letter の <img>）。各要素の CSS transform を合成側で再現。
+  //    drawLogoGroup と同じ式：中心(cx,cy)→中心合わせ(-50%)→回転→スケール。
+  const letters = document.querySelectorAll('#canvas-wrap .letter');
+  letters.forEach((el) => {
+    if (el.style.display === 'none' || !el.complete || el.naturalWidth === 0) return;
+    // 要素の幅・高さ（px）と中心位置を transform から取り出す
+    const w = parseFloat(el.style.width) || el.naturalWidth;
+    const h = parseFloat(el.style.height) || el.naturalHeight;
+    // transform: translate(cx,cy) translate(-50%,-50%) rotate(deg) scale(s)
+    const tr = el.style.transform || '';
+    const mT = tr.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/);
+    const mR = tr.match(/rotate\(([-\d.]+)deg\)/);
+    const mS = tr.match(/scale\(([-\d.]+)\)/);
+    const cx = mT ? parseFloat(mT[1]) : W / 2;
+    const cy = mT ? parseFloat(mT[2]) : H / 2;
+    const rot = mR ? parseFloat(mR[1]) : 0;
+    const sc = mS ? parseFloat(mS[1]) : 1;
+    const op = el.style.opacity !== '' ? parseFloat(el.style.opacity) : 1;
+
+    ctx.save();
+    ctx.globalAlpha = op;
+    ctx.translate(cx, cy);
+    ctx.rotate((rot * Math.PI) / 180);
+    ctx.scale(sc, sc);
+    ctx.drawImage(el, -w / 2, -h / 2, w, h);
+    ctx.restore();
+  });
+
+  // 3) 線オーバーレイ canvas（ロゴの白い枠線アニメ）
+  if (overlayCanvas) ctx.drawImage(overlayCanvas, 0, 0);
+
+  // ダウンロード（ファイル名にタイムスタンプ）
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const link = document.createElement('a');
+  link.download = `poster-${ts}.png`;
+  link.href = out.toDataURL('image/png');
+  link.click();
 }
 
 // Q のアニメーション一式を発火（手動 Q / 7秒ごとの自動の両方から呼ぶ）
