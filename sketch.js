@@ -2537,31 +2537,37 @@ function keyPressed() {
 function saveScreenshot() {
   const mainCanvas = document.querySelector('#canvas-wrap canvas');
   if (!mainCanvas) return;
-  const W = mainCanvas.width, H = mainCanvas.height;
 
-  // 合成用 canvas
+  // 論理サイズ（CSS px）。ロゴ <img> の transform はこの座標系で指定されている。
+  // メインキャンバスは Retina で実ピクセルが密度倍になっているため、論理座標へ統一する。
+  const Wl = width;   // p5 の論理幅
+  const Hl = height;  // p5 の論理高さ
+  const density = (typeof pixelDensity === 'function' ? pixelDensity() : 1) || 1;
+
+  // 合成用 canvas は実ピクセル解像度で作り、context を density 倍にして
+  // 以降すべて「論理座標」で描く（メイン・ロゴ・オーバーレイの基準を一致させる）。
   const out = document.createElement('canvas');
-  out.width = W; out.height = H;
+  out.width = Math.round(Wl * density);
+  out.height = Math.round(Hl * density);
   const ctx = out.getContext('2d');
+  ctx.scale(density, density);
 
-  // 1) メインキャンバス（背景・図形・帯）
-  ctx.drawImage(mainCanvas, 0, 0);
+  // 1) メインキャンバス（背景・図形・帯）。実ピクセル→論理サイズへ縮小して貼る。
+  ctx.drawImage(mainCanvas, 0, 0, Wl, Hl);
 
-  // 2) ロゴSVG（.letter の <img>）。各要素の CSS transform を合成側で再現。
+  // 2) ロゴSVG（.letter の <img>）。各要素の CSS transform を論理座標で再現。
   //    drawLogoGroup と同じ式：中心(cx,cy)→中心合わせ(-50%)→回転→スケール。
   const letters = document.querySelectorAll('#canvas-wrap .letter');
   letters.forEach((el) => {
     if (el.style.display === 'none' || !el.complete || el.naturalWidth === 0) return;
-    // 要素の幅・高さ（px）と中心位置を transform から取り出す
     const w = parseFloat(el.style.width) || el.naturalWidth;
     const h = parseFloat(el.style.height) || el.naturalHeight;
-    // transform: translate(cx,cy) translate(-50%,-50%) rotate(deg) scale(s)
     const tr = el.style.transform || '';
     const mT = tr.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/);
     const mR = tr.match(/rotate\(([-\d.]+)deg\)/);
     const mS = tr.match(/scale\(([-\d.]+)\)/);
-    const cx = mT ? parseFloat(mT[1]) : W / 2;
-    const cy = mT ? parseFloat(mT[2]) : H / 2;
+    const cx = mT ? parseFloat(mT[1]) : Wl / 2;
+    const cy = mT ? parseFloat(mT[2]) : Hl / 2;
     const rot = mR ? parseFloat(mR[1]) : 0;
     const sc = mS ? parseFloat(mS[1]) : 1;
     const op = el.style.opacity !== '' ? parseFloat(el.style.opacity) : 1;
@@ -2575,10 +2581,9 @@ function saveScreenshot() {
     ctx.restore();
   });
 
-  // 3) 線オーバーレイ canvas（ロゴの白い枠線アニメ）
-  if (overlayCanvas) ctx.drawImage(overlayCanvas, 0, 0);
+  // 3) 線オーバーレイ canvas（ロゴの白い枠線アニメ）。論理サイズへ貼る。
+  if (overlayCanvas) ctx.drawImage(overlayCanvas, 0, 0, Wl, Hl);
 
-  // ダウンロード（ファイル名にタイムスタンプ）
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const link = document.createElement('a');
   link.download = `poster-${ts}.png`;
