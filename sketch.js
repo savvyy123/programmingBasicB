@@ -282,13 +282,13 @@ const params = {
 
   // アンパサンド記号（&.svg、1文字）
   ampShow: true,
-  ampX: 174, ampY: 370, ampScale: 1.01, ampRot: 0, ampAlpha: 255,
+  ampX: 174, ampY: 326, ampScale: 1.01, ampRot: 0, ampAlpha: 255,
 
   // "design" ロゴ（design.svg を d/e/s/i/g/n の6文字に分割）
   deShow: true,         // 表示するか
   deScale: 0.85,        // 6文字共通の基準スケール
-  deX: 43,              // 共通の横位置（px, 中心からのずれ）
-  deY: 587,             // 共通の縦位置（px, 中心からのずれ）
+  deX: 22,              // 共通の横位置（px, 中心からのずれ）
+  deY: 522,             // 共通の縦位置（px, 中心からのずれ）
   ddShow: true,  ddX: 0, ddY: 0, ddScale: 1.0, ddRot: 0, ddAlpha: 255, // d
   deeShow: true, deeX: 0, deeY: 0, deeScale: 1.0, deeRot: 0, deeAlpha: 255, // e
   dsShow: true,  dsX: 0, dsY: 0, dsScale: 1.0, dsRot: 0, dsAlpha: 255, // s
@@ -304,7 +304,7 @@ const params = {
   syShow: true,         // 表示するか
   syScale: 0.69,        // 6文字共通の基準スケール
   syX: 239,             // 共通の横位置（px, 中心からのずれ）
-  syY: 739,             // 共通の縦位置（px, 中心からのずれ）
+  syY: 696,             // 共通の縦位置（px, 中心からのずれ）
   ss1Show: true, ss1X: 0, ss1Y: 0, ss1Scale: 1.0, ss1Rot: 0, ss1Alpha: 255, // s
   syyShow: true, syyX: 0, syyY: 0, syyScale: 1.0, syyRot: 0, syyAlpha: 255,  // y
   ss2Show: true, ss2X: 0, ss2Y: 0, ss2Scale: 1.0, ss2Rot: 0, ss2Alpha: 255, // s
@@ -312,22 +312,15 @@ const params = {
   seShow: true,  seX: 0, seY: 0, seScale: 1.0, seRot: 0, seAlpha: 255,       // e
   smShow: true,  smX: 0, smY: 0, smScale: 1.0, smRot: 0, smAlpha: 255,       // m
 
-  // 日付ロゴ（2026.06.04.svg を 10文字に分割）。dt〜 は共通設定
+  // 日付ロゴ（2026.06.04.svg、単一画像）。
+  // 以前は10文字に分割して dtc0〜dtc9 で字間を調整していたが、
+  // その調整を反映した新しい一枚SVGに差し替えたため、共通設定のみ残す。
   dtShow: true,
-  dtScale: 0.74,        // 10文字共通の基準スケール
-  dtX: 109,             // 共通の横位置（px, 中心からのずれ）
-  dtY: -435,            // 共通の縦位置（px, 中心からのずれ）
-  // 各文字（2 0 2 6 . 0 6 . 0 4）：dtc0〜dtc9
-  dtc0Show: true, dtc0X: -87, dtc0Y: 0, dtc0Scale: 1.0, dtc0Rot: 0, dtc0Alpha: 255, // 2
-  dtc1Show: true, dtc1X: -87, dtc1Y: 0, dtc1Scale: 1.0, dtc1Rot: 0, dtc1Alpha: 255, // 0
-  dtc2Show: true, dtc2X: -87, dtc2Y: 0, dtc2Scale: 1.0, dtc2Rot: 0, dtc2Alpha: 255, // 2
-  dtc3Show: true, dtc3X: -87, dtc3Y: 0, dtc3Scale: 1.0, dtc3Rot: 0, dtc3Alpha: 255, // 6
-  dtc4Show: true, dtc4X: -65, dtc4Y: 0, dtc4Scale: 1.0, dtc4Rot: 0, dtc4Alpha: 255, // .
-  dtc5Show: true, dtc5X: -43, dtc5Y: 0, dtc5Scale: 1.0, dtc5Rot: 0, dtc5Alpha: 255, // 0
-  dtc6Show: true, dtc6X: -43, dtc6Y: 0, dtc6Scale: 1.0, dtc6Rot: 0, dtc6Alpha: 255, // 6
-  dtc7Show: true, dtc7X: -22, dtc7Y: 0, dtc7Scale: 1.0, dtc7Rot: 0, dtc7Alpha: 255, // .
-  dtc8Show: true, dtc8X: 0, dtc8Y: 0, dtc8Scale: 1.0, dtc8Rot: 0, dtc8Alpha: 255, // 0
-  dtc9Show: true, dtc9X: 0, dtc9Y: 0, dtc9Scale: 1.0, dtc9Rot: 0, dtc9Alpha: 255, // 4
+  dtScale: 0.74,        // 基準スケール
+  dtX: 109,             // 横位置（px, 中心からのずれ）
+  dtY: -435,            // 縦位置（px, 中心からのずれ）
+  dtRot: 0,             // 回転（度）
+  dtAlpha: 255,         // 不透明度
 };
 
 // 分割した文字SVGのDOM要素（ベクターのまま表示してジャギーを防ぐ）
@@ -361,15 +354,10 @@ let domSyS1, domSyY, domSyS2, domSyT, domSyE, domSyM;
 const SYS_W = 835.99;
 const SYS_H = 206.14;
 
-// 日付ロゴ（2026.06.04.svg、10文字）の DOM 要素と元サイズ
-let domDate = [];
-const DATE_W = 412.79;
-const DATE_H = 63.92;
-// 各文字SVGのファイル名（2 0 2 6 . 0 6 . 0 4 の順）
-const DATE_FILES = [
-  'date_d2_a.svg', 'date_d0_a.svg', 'date_d2_b.svg', 'date_d6_a.svg', 'date_dot_a.svg',
-  'date_d0_b.svg', 'date_d6_b.svg', 'date_dot_b.svg', 'date_d0_c.svg', 'date_d4_a.svg',
-];
+// 日付ロゴ（2026.06.04.svg、単一画像）の DOM 要素と元サイズ（viewBox）
+let domDate = null;
+const DATE_W = 404.64;
+const DATE_H = 55.73;
 
 // 各図形のアニメーション状態（Q キーで波アニメ）。
 // 三角形・正方形は2セット分。generic 関数が animating/animT を書き換える。
@@ -462,8 +450,8 @@ function setup() {
   domSyE = makeLetterDom('assets/sys_e.svg');
   domSyM = makeLetterDom('assets/sys_m.svg');
 
-  // 日付ロゴ（10文字）
-  domDate = DATE_FILES.map((f) => makeLetterDom('assets/' + f));
+  // 日付ロゴ（単一画像）
+  domDate = makeLetterDom('assets/2026.06.04.svg');
 
   try {
     setupPane();
@@ -1759,25 +1747,14 @@ function setupPane() {
   addSysLetter('e', 'se');
   addSysLetter('m', 'sm');
 
-  // 日付ロゴ（2026.06.04、10文字）
+  // 日付ロゴ（2026.06.04、単一画像）
   const date = pane.addFolder({ title: 'date (2026.06.04)' });
   date.addInput(params, 'dtShow');
   date.addInput(params, 'dtScale', { min: 0.1, max: 5, step: 0.01 });
   date.addInput(params, 'dtX', { min: -1000, max: 1000, step: 1 });
   date.addInput(params, 'dtY', { min: -1000, max: 1000, step: 1 });
-
-  // 各文字（2 0 2 6 . 0 6 . 0 4）のサブフォルダ
-  const dateLabels = ['2', '0', '2', '6', '.', '0', '6', '.', '0', '4'];
-  dateLabels.forEach((label, i) => {
-    const p = 'dtc' + i;
-    const f = date.addFolder({ title: `${label} (${i})`, expanded: false });
-    f.addInput(params, p + 'Show');
-    f.addInput(params, p + 'X', { min: -1000, max: 1000, step: 1 });
-    f.addInput(params, p + 'Y', { min: -1000, max: 1000, step: 1 });
-    f.addInput(params, p + 'Scale', { min: 0.1, max: 5, step: 0.01 });
-    f.addInput(params, p + 'Rot', { min: -180, max: 180, step: 1 });
-    f.addInput(params, p + 'Alpha', { min: 0, max: 255, step: 1 });
-  });
+  date.addInput(params, 'dtRot', { min: -180, max: 180, step: 1 });
+  date.addInput(params, 'dtAlpha', { min: 0, max: 255, step: 1 });
 
   // 現在のパラメータを JSON でクリップボードにコピー
   // params（フラット）に加え、別オブジェクトの bg（くらげ背景）も含める
@@ -2569,17 +2546,13 @@ function drawLetters() {
     ],
   });
 
-  // 日付ロゴ（2026.06.04 の10文字）
+  // 日付ロゴ（2026.06.04.svg、単一画像。字間調整はSVG側に反映済み）
   drawLogoGroup({
     show: params.dtShow, scale: params.dtScale,
     x: params.dtX, y: params.dtY, svgW: DATE_W, svgH: DATE_H,
-    letters: domDate.map((dom, i) => ({
-      dom,
-      show: params['dtc' + i + 'Show'],
-      x: params['dtc' + i + 'X'], y: params['dtc' + i + 'Y'],
-      s: params['dtc' + i + 'Scale'], rot: params['dtc' + i + 'Rot'],
-      a: params['dtc' + i + 'Alpha'],
-    })),
+    letters: [
+      { dom: domDate, show: true, x: 0, y: 0, s: 1, rot: params.dtRot, a: params.dtAlpha },
+    ],
   });
 }
 
