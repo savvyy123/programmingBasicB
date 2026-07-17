@@ -282,13 +282,13 @@ const params = {
 
   // アンパサンド記号（&.svg、1文字）
   ampShow: true,
-  ampX: 174, ampY: 326, ampScale: 1.01, ampRot: 0, ampAlpha: 255,
+  ampX: 174, ampY: 261, ampScale: 0.95, ampRot: 0, ampAlpha: 255,
 
   // "design" ロゴ（design.svg を d/e/s/i/g/n の6文字に分割）
   deShow: true,         // 表示するか
   deScale: 0.85,        // 6文字共通の基準スケール
   deX: 22,              // 共通の横位置（px, 中心からのずれ）
-  deY: 522,             // 共通の縦位置（px, 中心からのずれ）
+  deY: 457,             // 共通の縦位置（px, 中心からのずれ）
   ddShow: true,  ddX: 0, ddY: 0, ddScale: 1.0, ddRot: 0, ddAlpha: 255, // d
   deeShow: true, deeX: 0, deeY: 0, deeScale: 1.0, deeRot: 0, deeAlpha: 255, // e
   dsShow: true,  dsX: 0, dsY: 0, dsScale: 1.0, dsRot: 0, dsAlpha: 255, // s
@@ -304,8 +304,8 @@ const params = {
   syShow: true,         // 表示するか
   syScale: 0.69,        // 6文字共通の基準スケール
   syX: 239,             // 共通の横位置（px, 中心からのずれ）
-  syY: 696,             // 共通の縦位置（px, 中心からのずれ）
-  ss1Show: true, ss1X: 0, ss1Y: 0, ss1Scale: 1.0, ss1Rot: 0, ss1Alpha: 255, // s
+  syY: 630,             // 共通の縦位置（px, 中心からのずれ）
+  ss1Show: true, ss1X: 43, ss1Y: 0, ss1Scale: 1.27, ss1Rot: 0, ss1Alpha: 255, // s
   syyShow: true, syyX: 0, syyY: 0, syyScale: 1.0, syyRot: 0, syyAlpha: 255,  // y
   ss2Show: true, ss2X: 0, ss2Y: 0, ss2Scale: 1.0, ss2Rot: 0, ss2Alpha: 255, // s
   stShow: true,  stX: 0, stY: 0, stScale: 1.0, stRot: 0, stAlpha: 255,       // t
