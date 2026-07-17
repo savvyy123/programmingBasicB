@@ -63,12 +63,16 @@ const params = {
   boltColorR: { r: 150, g: 60, b: 220 },  // 右：紫
 
   // 人物ローポリ（main21）：カメラで全身をドロネー三角分割でポリゴン化
-  polyShow: false,       // 描くか
+  polyShow: true,        // 描くか
   polyX: 0,              // 横位置（px, 中心からのずれ）
-  polyY: 522,            // 縦位置（px, 中心からのずれ）
+  polyY: 130,            // 縦位置（px, 中心からのずれ）
   polyFraction: 1.8,     // 全身がキャンバスの何割を占めるか（サイズ）
   polyPointCount: 850,   // 散布する点の数
   polyUpdateEvery: 7,    // 点配置を何フレームごとに更新するか
+  // 横切る人への即応：bbox の中心移動/サイズ変化が「体サイズ×この割合」を超えたら
+  // 上の周期を待たずに即再散布する。静止時（揺れ・呼吸）では届かない値にしてあり、
+  // 立ち止まっている人の見た目には影響しない。
+  polyMoveRescatter: 0.1,
   polyDarkBias: 3.4,     // 暗部に点を寄せる強さ
   polyTrackSmooth: 0.06, // bbox追従の平滑化
   polyContrastSmooth: 0.08, // コントラストの平滑化
@@ -82,6 +86,10 @@ const params = {
   polyColorTop: { r: 40, g: 90, b: 200 },    // 上の色（明るい青）
   polyColorBottom: { r: 140, g: 255, b: 0 }, // 下の色（緑）
   polyGradBias: 1.7,     // グラデの偏り（>1で青の領域が広がる）
+  // マスク異常対策（放置後にマスクが「全面＝人物」になったまま固まる不具合への防御）。
+  // 正常な運用では発動せず、描画には一切影響しない保守的な値にしてある。
+  polyMaxCoverage: 0.9,  // 人物がフレームのこの割合を超えたら異常マスクとみなして描かない
+  polyStaleSec: 3,       // マスク更新がこの秒数途絶えたらセグメンテーションを自動再起動
 
   // 動き検出ボックス（main22）：動いた領域を四角枠で囲み、中心点を近接リンクで結ぶ
   boxOn: true,           // 検出ボックスを描くか
@@ -504,6 +512,15 @@ let polyFrameSinceUpdate = 0;
 let polyTris = null;
 // このフレームで polyVideo/polySegMask の loadPixels を済ませたか（重複読み込み回避）
 let polyPixelsFrame = -1;
+// マスク異常対策の状態
+let polySegMaskAtMs = 0;    // 最後にセグメンテーション結果を受け取った時刻（ms）
+let polySegStartAtMs = 0;   // 最後に detectStart した時刻（ms）。再起動のクールダウンを兼ねる
+let polyInvalidFrames = 0;  // 異常/無人マスクが連続したフレーム数（一定数で追跡状態をリセット）
+let polyRestartCount = 0;   // セグメンテーションを再起動した回数（ログ用）
+let lastDrawMs = 0;         // 前回 draw() の時刻。タブ非表示等からの復帰検出に使う
+// 横切る人への即応（移動検出）用：最後に点を散布した時点の bbox 中心とサイズ
+let polyLastScatterCX = 0, polyLastScatterCY = 0, polyLastScatterBody = 0;
+let polyScatterInit = false;
 // Tweakpane の参照（H キーで表示/非表示を切り替える）
 let tweakPane = null;
 // 人物のキャンバス座標での矩形範囲（重なり判定用）。{x,y,w,h} または null
@@ -845,14 +862,27 @@ function drawBolt() {
 
 // ---- 人物ローポリ（main21）----
 
+// セグメンテーション結果の受け取り。再起動時にも同じものを使うため名前付きで持つ。
+// 受信時刻の記録は死活監視（ウォッチドッグ）用。
+function onPolySegResult(r) {
+  polySegMask = r && r.mask ? r.mask : null;
+  polySegMaskAtMs = millis();
+}
+
 // カメラとモデルの検出を開始
 function setupPoly() {
   try {
-    polyVideo = createCapture(VIDEO, () => { polyReady = true; });
+    polyVideo = createCapture(VIDEO, () => {
+      polyReady = true;
+      // カメラ許可が遅れた場合に、健全な検出ループを誤って再起動しないよう
+      // 「カメラが使えるようになった時刻」からウォッチドッグの計測を始める
+      polySegStartAtMs = millis();
+    });
     polyVideo.size(640, 480);
     polyVideo.hide();
     if (polySeg && polySeg.detectStart) {
-      polySeg.detectStart(polyVideo, (r) => { polySegMask = r && r.mask ? r.mask : null; });
+      polySeg.detectStart(polyVideo, onPolySegResult);
+      polySegStartAtMs = millis();
     }
     if (polyHandPose && polyHandPose.detectStart) {
       polyHandPose.detectStart(polyVideo, (r) => { polyHands = r || []; });
@@ -861,6 +891,41 @@ function setupPoly() {
     polyReady = false;
     console.warn('カメラ準備に失敗:', e);
   }
+}
+
+// セグメンテーションの検出ループを再起動する（自己修復）。
+// ml5@1.2.1 の detectLoop は推論が一度例外を投げると静かに死に、しかも内部の
+// detecting フラグが true のまま残るため、普通に detectStart を呼び直しても
+// no-op になる。そこでフラグを強制的に戻してから detectStart する
+// （CDN でバージョン固定（@1.2.1）している前提の内部フラグ操作）。
+function restartPolySeg() {
+  if (!polySeg || !polySeg.detectStart || !polyVideo) return;
+  polyRestartCount++;
+  console.warn(`セグメンテーションが ${params.polyStaleSec} 秒無応答のため再起動します（${polyRestartCount} 回目）`);
+  try {
+    polySeg.detecting = false;   // 死んだループが残したフラグを解除
+    polySeg.signalStop = false;
+    polySeg.prevCall = '';       // ml5 の「二重 detectStart」警告を抑止
+    polySeg.detectStart(polyVideo, onPolySegResult);
+  } catch (e) {
+    console.warn('セグメンテーション再起動に失敗:', e);
+  }
+  polySegStartAtMs = millis(); // 再起動直後の連続発火を防ぐ（クールダウン）
+}
+
+// 人物ローポリの追跡状態を破棄して、次の正常フレームで一から測り直す。
+// 異常時（嘘マスク・NaN 等）にのみ呼ばれ、正常時の描画には影響しない。
+function resetPolyState() {
+  polyBboxInit = false;   // 次フレームで bbox を測り直す
+  polyCenterInit = false; // 中心・サイズも測り直す
+  polyTris = null;        // ドロネーキャッシュを破棄
+  polyPoints = [];        // 点群も破棄（次の正常フレームで即再散布される）
+  polyFrameSinceUpdate = 0;
+  polyCanvasBox = null;   // ストリングアート重なり判定（bbox）も無効に
+  polySmoothMinB = 0;     // コントラストの平滑化状態を初期値へ
+  polySmoothMaxB = 255;
+  polyScatterInit = false; // 移動検出（即再散布）の基準もリセット
+  if (polyMaskG) polyMaskG.clear(); // 重なり色（shape）の残像も消す
 }
 
 // 指定座標に近い手のランドマーク z を返す（手が近くにある場合のみ）
@@ -929,13 +994,16 @@ function drawPolyPerson(clipRect) {
   const mw = polySegMask.width, mh = polySegMask.height;
   if (mw === 0 || mh === 0 || polyVideo.pixels.length === 0) return;
 
-  // bbox 取得（stride で間引き）
+  // bbox 取得（stride で間引き）。あわせて「人物」ピクセルの被覆率も数える
   let minX = mw, maxX = -1, minY = mh, maxY = -1;
   const stride = 4;
+  let personCount = 0, sampleCount = 0;
   for (let y = 0; y < mh; y += stride) {
     for (let x = 0; x < mw; x += stride) {
       const idx = (y * mw + x) * 4;
+      sampleCount++;
       if (polySegMask.pixels[idx + 3] < 128) {
+        personCount++;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -945,6 +1013,22 @@ function drawPolyPerson(clipRect) {
   }
   if (maxX < 0 || maxY < 0) return;
   if (maxX - minX < 10 || maxY - minY < 10) return;
+
+  // --- マスク妥当性ゲート（放置後の「全面ポリゴン化」対策） ---
+  // セグメンテーションが壊れると「フレームほぼ全面＝人物」の嘘マスクが届く。
+  // 数値としては正常なので既存の異常値ガードでは弾けず、被覆率で判定する。
+  // 実際の人物が polyMaxCoverage（既定 0.9）を超えることは通常運用ではないため、
+  // 正常時の描画には一切影響しない。
+  const coverage = personCount / Math.max(sampleCount, 1);
+  if (coverage > params.polyMaxCoverage) {
+    if (!clipRect) { // 帯領域の2回目の呼び出しでは二重カウントしない
+      polyInvalidFrames++;
+      // 約0.5秒続いたら追跡状態を捨て、復旧後すぐ正しい位置にロックし直せるようにする
+      if (polyInvalidFrames === 30) resetPolyState();
+    }
+    return; // 嘘マスクのフレームは描かない
+  }
+  if (!clipRect) polyInvalidFrames = 0;
 
   // bbox 各端をスムージング
   const k = params.polyTrackSmooth;
@@ -957,6 +1041,11 @@ function drawPolyPerson(clipRect) {
     polySMinY = lerp(polySMinY, minY, k);
     polySMaxY = lerp(polySMaxY, maxY, k);
   }
+  // 生（未平滑化）の bbox を保持。点の散布はこちらを使う。
+  // 平滑化 bbox は横切る人に追いつけず、散布範囲と実際のシルエットの重なりが
+  // 縦の細い帯だけになって「縦にぶった斬られた」描画になるため。
+  // （グラデーション・重なり判定・異常値ガードは従来どおり平滑化値を使う）
+  const rawMinX = minX, rawMaxX = maxX, rawMinY = minY, rawMaxY = maxY;
   minX = polySMinX; maxX = polySMaxX; minY = polySMinY; maxY = polySMaxY;
   const bodyW = maxX - minX, bodyH = maxY - minY;
 
@@ -980,10 +1069,8 @@ function drawPolyPerson(clipRect) {
     bodyW <= 0 || bodyH <= 0 ||
     minX < -mw || maxX > mw * 2 || minY < -mh || maxY > mh * 2; // マスク範囲を大きく外れた
   if (polyBroken) {
-    polyBboxInit = false;   // 次フレームで bbox を測り直す
-    polyCenterInit = false; // 中心・サイズも測り直す
-    polyTris = null;        // ドロネーキャッシュも破棄
-    return;                 // この異常フレームは描かない
+    resetPolyState(); // 状態を破棄して次の正常フレームで測り直す（C: 自己回復）
+    return;           // この異常フレームは描かない（B: スキップ）
   }
 
   // 固定倍率：人物サイズに追従させず、マスク座標系を一定倍率で表示する。
@@ -991,11 +1078,24 @@ function drawPolyPerson(clipRect) {
   const renderScale = (Math.min(width, height) / mh) * params.polyFraction;
 
   // 点の更新（step方式）。clipRect 付き（帯領域の2回目）の呼び出しでは更新しない。
+  // 散布範囲は生の bbox（rawMinX..rawMaxY）＝現在のシルエットに常に一致させる。
+  // さらに、bbox 中心の移動やサイズ変化が「体サイズ×polyMoveRescatter」を超えたら
+  // 周期を待たずに即再散布する（横切る人・近づく人への即応。静止時は発動しない）。
   let pointsChanged = false;
   if (!clipRect) {
     polyFrameSinceUpdate++;
-    if (polyPoints.length === 0 || polyFrameSinceUpdate >= params.polyUpdateEvery) {
-      polyPoints = scatterPolyPoints(minX, minY, maxX, maxY, mw, mh);
+    const rawCX = (rawMinX + rawMaxX) / 2, rawCY = (rawMinY + rawMaxY) / 2;
+    const bodyNow = Math.max(rawMaxX - rawMinX, rawMaxY - rawMinY, 1);
+    const movedFar = polyScatterInit && (
+      Math.hypot(rawCX - polyLastScatterCX, rawCY - polyLastScatterCY) > bodyNow * params.polyMoveRescatter ||
+      Math.abs(bodyNow - polyLastScatterBody) > bodyNow * params.polyMoveRescatter
+    );
+    if (polyPoints.length === 0 || polyFrameSinceUpdate >= params.polyUpdateEvery || movedFar) {
+      polyPoints = scatterPolyPoints(rawMinX, rawMinY, rawMaxX, rawMaxY, mw, mh);
+      polyLastScatterCX = rawCX;
+      polyLastScatterCY = rawCY;
+      polyLastScatterBody = bodyNow;
+      polyScatterInit = true;
       polyFrameSinceUpdate = 0;
       pointsChanged = true;
     }
@@ -1370,6 +1470,7 @@ function setupPane() {
   poly.addInput(params, 'polyFraction', { min: 0.2, max: 2, step: 0.01, label: 'size (大きさ)' });
   poly.addInput(params, 'polyPointCount', { min: 200, max: 3000, step: 50, label: 'points (点数)' });
   poly.addInput(params, 'polyUpdateEvery', { min: 1, max: 20, step: 1, label: 'update every' });
+  poly.addInput(params, 'polyMoveRescatter', { min: 0.02, max: 0.5, step: 0.01, label: 'move rescatter (歩行追従)' });
   poly.addInput(params, 'polyDarkBias', { min: 0, max: 5, step: 0.1, label: 'dark bias' });
   poly.addInput(params, 'polyTrackSmooth', { min: 0.02, max: 0.5, step: 0.01, label: 'track smooth' });
   poly.addInput(params, 'polyContrastSmooth', { min: 0.01, max: 0.5, step: 0.01, label: 'contrast smooth' });
@@ -1383,6 +1484,9 @@ function setupPane() {
   poly.addInput(params, 'polyColorTop', { label: 'color top (上/青)' });
   poly.addInput(params, 'polyColorBottom', { label: 'color bottom (下/緑)' });
   poly.addInput(params, 'polyGradBias', { min: 0.3, max: 4, step: 0.05, label: 'grad bias (青の広さ)' });
+  // マスク異常対策（放置後の全面ポリゴン化バグへの防御）
+  poly.addInput(params, 'polyMaxCoverage', { min: 0.3, max: 1, step: 0.01, label: 'max coverage (異常判定)' });
+  poly.addInput(params, 'polyStaleSec', { min: 1, max: 10, step: 0.5, label: 'stale sec (再起動まで)' });
   // 人物とストリングアートの重なり部分を別色（紺）に
   poly.addInput(params, 'stringOverlapMode', {
     label: '重なり色 mode',
@@ -2139,6 +2243,24 @@ function draw() {
     polyWireBoost = 0;
   }
 
+  // セグメンテーションの死活監視（放置後の「全面ポリゴン化」対策）。
+  // ml5 の検出ループは例外で静かに死ぬことがあり、死ぬとマスクが最後の値のまま凍結する。
+  // コールバックが polyStaleSec 秒途絶えたらループが死んだと判断して再起動する。
+  // 正常時はコールバックが毎秒何十回も来るため、ここは決して発動しない。
+  // タブ非表示・スリープ等で描画自体が止まっていた場合は、ml5 のループも
+  // 一緒に止まっていただけなので、復帰直後は再起動せず同じ猶予を与える。
+  const nowMs = millis();
+  if (lastDrawMs > 0 && nowMs - lastDrawMs > 1000) {
+    polySegStartAtMs = nowMs; // 復帰直後：ウォッチドッグの計測をやり直す
+  }
+  lastDrawMs = nowMs;
+  if (polyReady && polySeg && polySegStartAtMs > 0) {
+    const aliveAt = Math.max(polySegMaskAtMs, polySegStartAtMs);
+    if (nowMs - aliveAt > params.polyStaleSec * 1000) {
+      restartPolySeg();
+    }
+  }
+
   // 一番背後のレイヤー：クラゲ写真をシェーダーで揺らした背景
   if (bg_p.show) {
     drawBackground();
@@ -2471,10 +2593,10 @@ function drawBandText(top, bh) {
 
   // 表示する行。空文字は空白行（1行目と2行目の間を空ける）
   const lines = [
-    '多摩美術大学　情報デザイン棟3F',
+    '多摩美術大学オープンキャンパス　情報デザイン棟4F',
     '',
-    'プログラミング基礎　最終課題　[担当教員]永松歩　高橋裕行',
-    '多摩美術大学情報デザイン学科情報デザインコース１年Bクラス',
+    'プログラミング基礎　[担当教員]永松歩　高橋裕行',
+    '多摩美術大学情報デザイン学科情報デザインコース1年Bクラス',
   ];
 
   fill(255);
