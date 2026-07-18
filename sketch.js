@@ -90,6 +90,10 @@ const params = {
   // 正常な運用では発動せず、描画には一切影響しない保守的な値にしてある。
   polyMaxCoverage: 0.9,  // 人物がフレームのこの割合を超えたら異常マスクとみなして描かない
   polyStaleSec: 3,       // マスク更新がこの秒数途絶えたらセグメンテーションを自動再起動
+  // 無人キープアライブ：有効な人物をこの秒数検出できていなければ予防的に再起動する。
+  // モデルが「無人」を返し続ける静かな固着を、次の来場者が来る前に治す。
+  // 無人中の再起動は誰も描かれていないので見た目への影響がない。
+  polyNoPersonSec: 60,
 
   // 動き検出ボックス（main22）：動いた領域を四角枠で囲み、中心点を近接リンクで結ぶ
   boxOn: true,           // 検出ボックスを描くか
@@ -509,6 +513,18 @@ let lastDrawMs = 0;         // 前回 draw() の時刻。タブ非表示等か�
 // 横切る人への即応（移動検出）用：最後に点を散布した時点の bbox 中心とサイズ
 let polyLastScatterCX = 0, polyLastScatterCY = 0, polyLastScatterBody = 0;
 let polyScatterInit = false;
+// 無人キープアライブ／再起動エスカレーションの状態
+let polyLastPersonMs = 0;        // 最後に「有効な人物」を検出した時刻（ms）
+let polySegCallbackCount = 0;    // セグメンテーションのコールバック総数
+let polyCallbacksAtRestart = 0;  // 直前の再起動時点でのコールバック総数（効果判定用）
+let polySegFailedRestarts = 0;   // コールバックが1つも来ないまま連続した再起動の回数
+let polyRebuildingSeg = false;   // モデル作り直し中（多重実行と誤発火の防止）
+// 動き検出（ピンクボックス系統）が最後に何かを捉えた時刻。セグメンテーションとの矛盾検出に使う
+let lastMotionMs = 0;
+// 「動きはあるのにセグメンテーションだけ無人」がこの時間続いたら故障とみなして再起動
+const POLY_MOTION_MISMATCH_MS = 10000;
+// カメラ映像そのものの停止検知（ログのみ。切り分け用）
+let lastVideoTime = -1, lastVideoAdvanceMs = 0, lastVideoStallWarnMs = 0;
 // Tweakpane の参照（H キーで表示/非表示を切り替える）
 let tweakPane = null;
 // 人物のキャンバス座標での矩形範囲（重なり判定用）。{x,y,w,h} または null
@@ -855,6 +871,7 @@ function drawBolt() {
 function onPolySegResult(r) {
   polySegMask = r && r.mask ? r.mask : null;
   polySegMaskAtMs = millis();
+  polySegCallbackCount++; // 再起動が効いたか（コールバックが再開したか）の判定に使う
 }
 
 // カメラとモデルの検出を開始
@@ -886,10 +903,25 @@ function setupPoly() {
 // detecting フラグが true のまま残るため、普通に detectStart を呼び直しても
 // no-op になる。そこでフラグを強制的に戻してから detectStart する
 // （CDN でバージョン固定（@1.2.1）している前提の内部フラグ操作）。
-function restartPolySeg() {
-  if (!polySeg || !polySeg.detectStart || !polyVideo) return;
+function restartPolySeg(reason) {
+  if (!polySeg || !polySeg.detectStart || !polyVideo || polyRebuildingSeg) return;
+
+  // 前回の再起動以降コールバックが1つも来ていなければ「再起動失敗」とみなす。
+  // 2回連続で失敗＝インスタンス自体が壊れている（WebGLコンテキスト喪失など）ので、
+  // フラグ修復では治らない。モデルごと作り直すエスカレーションへ移行する。
+  if (polyRestartCount > 0 && polySegCallbackCount === polyCallbacksAtRestart) {
+    polySegFailedRestarts++;
+    if (polySegFailedRestarts >= 2) {
+      rebuildPolySeg();
+      return;
+    }
+  } else {
+    polySegFailedRestarts = 0;
+  }
+  polyCallbacksAtRestart = polySegCallbackCount;
+
   polyRestartCount++;
-  console.warn(`セグメンテーションが ${params.polyStaleSec} 秒無応答のため再起動します（${polyRestartCount} 回目）`);
+  console.warn(`セグメンテーションを再起動します（理由: ${reason || '不明'} / ${polyRestartCount} 回目）`);
   try {
     polySeg.detecting = false;   // 死んだループが残したフラグを解除
     polySeg.signalStop = false;
@@ -899,6 +931,37 @@ function restartPolySeg() {
     console.warn('セグメンテーション再起動に失敗:', e);
   }
   polySegStartAtMs = millis(); // 再起動直後の連続発火を防ぐ（クールダウン）
+}
+
+// セグメンテーションのモデルインスタンス自体を作り直す（最終手段の自己修復）。
+// detectStart のやり直しでは治らない壊れ方（モデル内部の破損）を断ち切る。
+// 作り直し中は polySeg を null にして、ウォッチドッグ類を一時停止させる。
+function rebuildPolySeg() {
+  if (polyRebuildingSeg || typeof ml5 === 'undefined' || !ml5.bodySegmentation) return;
+  polyRebuildingSeg = true;
+  polySegFailedRestarts = 0;
+  polyRestartCount++;
+  console.warn(`再起動でコールバックが復帰しないため、セグメンテーションモデルを作り直します（${polyRestartCount} 回目）`);
+  try { if (polySeg && polySeg.detectStop) polySeg.detectStop(); } catch (e) { /* 旧インスタンスは捨てるだけ */ }
+  polySeg = null;
+  try {
+    const inst = ml5.bodySegmentation('SelfieSegmentation', { maskType: 'person' }, () => {
+      // モデルの準備ができてから検出を再開する
+      polySeg = inst;
+      polyRebuildingSeg = false;
+      polySegStartAtMs = millis();
+      polyCallbacksAtRestart = polySegCallbackCount;
+      try {
+        if (polySeg && polySeg.detectStart && polyVideo) polySeg.detectStart(polyVideo, onPolySegResult);
+        console.warn('セグメンテーションモデルの作り直しが完了しました');
+      } catch (e) {
+        console.warn('モデル再作成後の detectStart に失敗:', e);
+      }
+    });
+  } catch (e) {
+    polyRebuildingSeg = false;
+    console.warn('セグメンテーションモデルの作り直しに失敗:', e);
+  }
 }
 
 // 人物ローポリの追跡状態を破棄して、次の正常フレームで一から測り直す。
@@ -1017,6 +1080,7 @@ function drawPolyPerson(clipRect) {
     return; // 嘘マスクのフレームは描かない
   }
   if (!clipRect) polyInvalidFrames = 0;
+  polyLastPersonMs = millis(); // 有効な人物を検出できている（無人キープアライブの基準時刻）
 
   // bbox 各端をスムージング
   const k = params.polyTrackSmooth;
@@ -1332,6 +1396,9 @@ function drawMotionBoxes() {
 
   const detected = detectMotionBoxes(mw, mh);
   updateBoxTracked(detected);
+  // 動き（CPU差分、セグメンテーションとは独立系統）を捉えた時刻を記録。
+  // 「動きはあるのに人物だけ検出できない」矛盾＝セグメンテーション故障の検出に使う
+  if (detected.length > 0) lastMotionMs = millis();
 
   const col = params.boxColor;
   const ctx = drawingContext;
@@ -1475,6 +1542,7 @@ function setupPane() {
   // マスク異常対策（放置後の全面ポリゴン化バグへの防御）
   poly.addInput(params, 'polyMaxCoverage', { min: 0.3, max: 1, step: 0.01, label: 'max coverage (異常判定)' });
   poly.addInput(params, 'polyStaleSec', { min: 1, max: 10, step: 0.5, label: 'stale sec (再起動まで)' });
+  poly.addInput(params, 'polyNoPersonSec', { min: 10, max: 300, step: 5, label: 'no person restart (s)' });
   // 人物とストリングアートの重なり部分を別色（紺）に
   poly.addInput(params, 'stringOverlapMode', {
     label: '重なり色 mode',
@@ -2231,10 +2299,33 @@ function draw() {
     polySegStartAtMs = nowMs; // 復帰直後：ウォッチドッグの計測をやり直す
   }
   lastDrawMs = nowMs;
-  if (polyReady && polySeg && polySegStartAtMs > 0) {
+  if (polyReady && polySeg && !polyRebuildingSeg && polySegStartAtMs > 0) {
     const aliveAt = Math.max(polySegMaskAtMs, polySegStartAtMs);
     if (nowMs - aliveAt > params.polyStaleSec * 1000) {
-      restartPolySeg();
+      restartPolySeg(`${params.polyStaleSec}秒間コールバック無応答`);
+    }
+
+    // --- 無人期間のセルフヒーリング（人がいる間は polyLastPersonMs が毎フレーム更新されるため発動しない） ---
+    const lastPersonOrStart = Math.max(polyLastPersonMs, polySegStartAtMs);
+    if (nowMs - lastMotionMs < 1000 && nowMs - lastPersonOrStart > POLY_MOTION_MISMATCH_MS) {
+      // 動き検出（独立系統）は反応しているのにセグメンテーションだけ無人＝矛盾。壊れているとみなして即再起動
+      restartPolySeg('動きがあるのに人物を検出できない');
+    } else if (nowMs - lastPersonOrStart > params.polyNoPersonSec * 1000) {
+      // 完全無人が続く場合も定期的に予防再起動。無人中は誰も描かれていないので見た目への影響なし
+      restartPolySeg(`無人が${params.polyNoPersonSec}秒継続（予防）`);
+    }
+  }
+
+  // カメラ映像そのものの停止検知（ログのみ・切り分け用）。
+  // currentTime が進まない＝映像側の問題で、セグメンテーション再起動では治らない
+  if (polyReady && polyVideo && polyVideo.elt) {
+    const vt = polyVideo.elt.currentTime || 0;
+    if (vt !== lastVideoTime) {
+      lastVideoTime = vt;
+      lastVideoAdvanceMs = nowMs;
+    } else if (lastVideoAdvanceMs > 0 && nowMs - lastVideoAdvanceMs > 5000 && nowMs - lastVideoStallWarnMs > 10000) {
+      lastVideoStallWarnMs = nowMs;
+      console.warn('カメラ映像が5秒以上停止しています（セグメンテーションではなく映像側の問題の可能性）');
     }
   }
 
