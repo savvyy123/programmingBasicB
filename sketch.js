@@ -3,6 +3,20 @@ const ASPECT_W = 9;
 const ASPECT_H = 16;
 const MARGIN_Y = 60; // 上下の余白（px）
 
+// ---- キオスク（展示運用）モード ----
+// URL に ?kiosk=1 を付けて開くと、Tweakpane・カーソルを隠し、キャンバスをウィンドウ全面にする。
+// さらに KIOSK_RELOAD_MIN 分おきに ?kiosk=1 を維持したまま自動リロードし、
+// 長時間運転で溜まるメモリ肥大や ML モデルの劣化をまるごとリセットする。
+// リロードは来場者の目の前で切れないよう「無人が10秒続いた隙」を狙い、
+// 人が絶えない場合も KIOSK_RELOAD_FORCE_MIN 分で強制実行する。
+// ?kiosk なしの通常起動には一切影響しない（調整作業はいままで通り）。
+// 注意: JS からの全画面化はブラウザにブロックされ得るため、確実なのは
+// OS レベルの全画面（Mac: Cmd+Ctrl+F）か Chrome の --kiosk 起動。これらはリロード後も維持される。
+const KIOSK = new URLSearchParams(window.location.search).has('kiosk');
+const KIOSK_RELOAD_MIN = 15;       // 自動リロードの間隔（分）
+const KIOSK_RELOAD_FORCE_MIN = 20; // 人がいても強制リロードする上限（分）
+let kioskReloading = false;        // リロード実行中の多重発火防止
+
 // ---- 背景：クラゲ写真をシェーダーのノイズで水面のように歪ませる（一番背後のレイヤー） ----
 // （programmingBasicBPoster 由来。WEBGLバッファでシェーダー処理し、2Dキャンバスへ貼る）
 let bgImg;        // 元のクラゲ画像
@@ -67,7 +81,7 @@ const params = {
   polyX: 0,              // 横位置（px, 中心からのずれ）
   polyY: 130,            // 縦位置（px, 中心からのずれ）
   polyFraction: 1.8,     // 全身がキャンバスの何割を占めるか（サイズ）
-  polyPointCount: 850,   // 散布する点の数
+  polyPointCount: 2500,  // 散布する点の数
   polyUpdateEvery: 7,    // 点配置を何フレームごとに更新するか
   // 横切る人への即応：bbox の中心移動/サイズ変化が「体サイズ×この割合」を超えたら
   // 上の周期を待たずに即再散布する。静止時（揺れ・呼吸）では届かない値にしてあり、
@@ -461,6 +475,19 @@ function setup() {
     setupPane();
   } catch (e) {
     console.warn('パネル初期化に失敗:', e);
+  }
+
+  // キオスク（展示）モードの初期化
+  if (KIOSK) {
+    noCursor(); // カーソルも「UI」として隠す
+    // Tweakpane を最初から隠す（H キーでいつでも再表示できる）
+    if (tweakPane && tweakPane.element) tweakPane.element.style.display = 'none';
+    // 全画面化を試みる。ユーザー操作なしではブロックされることがあるため、
+    // その場合は最初のクリック/タッチで入る（OS全画面・--kiosk 起動なら不要）
+    try { fullscreen(true); } catch (e) { /* ブロックされたらクリック待ち */ }
+    window.addEventListener('pointerdown', () => {
+      try { if (!fullscreen()) fullscreen(true); } catch (e) { /* 手動 F でも可 */ }
+    }, { once: true });
   }
 }
 
@@ -1452,7 +1479,8 @@ function bandRect() {
 // キャンバスサイズを計算。
 // フルスクリーン時は画面全体、通常時は画面に収まる最大の縦長(9:16)。
 function portraitSize() {
-  if (fullscreen()) {
+  // キオスク時は常にウィンドウ全面（OS全画面/--kiosk 起動ならそのまま画面全面になる）
+  if (KIOSK || fullscreen()) {
     return [windowWidth, windowHeight];
   }
   let h = windowHeight - MARGIN_Y * 2;
@@ -2313,6 +2341,18 @@ function draw() {
     } else if (nowMs - lastPersonOrStart > params.polyNoPersonSec * 1000) {
       // 完全無人が続く場合も定期的に予防再起動。無人中は誰も描かれていないので見た目への影響なし
       restartPolySeg(`無人が${params.polyNoPersonSec}秒継続（予防）`);
+    }
+  }
+
+  // キオスク：定期自動リロード。無人の隙（10秒）を狙い、上限で強制実行する。
+  // ?kiosk=1 を付けてリロードするので、再起動後もキオスク状態が維持される
+  if (KIOSK && !kioskReloading) {
+    const ageMin = nowMs / 60000; // ページを開いてからの経過（分）
+    const idle = nowMs - polyLastPersonMs > 10000; // 有効な人物を10秒以上見ていない
+    if (ageMin >= KIOSK_RELOAD_FORCE_MIN || (ageMin >= KIOSK_RELOAD_MIN && idle)) {
+      kioskReloading = true;
+      console.warn(`キオスク定期リロードを実行します（経過 ${ageMin.toFixed(1)} 分）`);
+      window.location.replace(window.location.pathname + '?kiosk=1');
     }
   }
 
